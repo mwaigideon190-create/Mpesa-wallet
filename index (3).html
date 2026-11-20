@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M-Pesa Dollar Wallet</title>
+<style>
+:root{--bg:#0f1720;--card:#18232f;--text:#eef3f7;--muted:#8ea0b0;--green:#2da44e;--red:#e5534b}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--text);display:flex;justify-content:center;padding:16px}
+.app{width:100%;max-width:420px}
+h1{font-size:22px;margin:8px 0 16px}
+.card{background:var(--card);border-radius:14px;padding:16px;margin-bottom:14px}
+input,button{width:100%;padding:13px;margin-top:10px;border-radius:10px;border:1px solid #2b3a48;background:#0f1720;color:var(--text);font-size:16px}
+button{background:var(--green);border:0;font-weight:600}
+button.alt{background:#2b3a48}
+.bal{font-size:34px;font-weight:700}
+.muted{color:var(--muted);font-size:14px}
+#msg{min-height:20px;margin:8px 0;font-size:14px}
+.err{color:var(--red)}.ok{color:var(--green)}.hidden{display:none}
+.tx{display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid #2b3a48;font-size:14px}
+</style>
+</head>
+<body>
+<div class="app">
+<h1>M-Pesa Dollar Wallet</h1>
+
+<div id="auth" class="card">
+<input id="email" type="email" placeholder="Email">
+<input id="phone" type="tel" placeholder="Phone (07XXXXXXXX) - new accounts only">
+<input id="pass" type="password" placeholder="Password (8+ characters)">
+<button id="login">Log in</button>
+<button id="signup" class="alt">Create account</button>
+</div>
+
+<div id="wallet" class="card hidden">
+<div class="muted" id="who"></div>
+<div class="bal" id="usd">$0.00</div>
+<div class="muted" id="kes">KES 0</div>
+<input id="amount" type="number" min="1" placeholder="Amount (KES)">
+<button id="add">Add money (M-Pesa)</button>
+<input id="wpass" type="password" placeholder="Password (needed to withdraw)">
+<button id="out" class="alt">Withdraw to M-Pesa</button>
+<button id="refresh" class="alt">Refresh</button>
+<button id="logout" class="alt">Log out</button>
+</div>
+
+<div id="msg"></div>
+
+<div id="txbox" class="card hidden">
+<div class="muted">Recent transactions</div>
+<div id="txs"></div>
+</div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let token = null;
+
+function say(t, ok){ const m = $('msg'); m.textContent = t; m.className = ok ? 'ok' : 'err'; }
+
+async function call(path, method, body){
+  const res = await fetch(path, {
+    method,
+    headers: Object.assign({'Content-Type':'application/json'}, token ? {Authorization:'Bearer ' + token} : {}),
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const data = await res.json().catch(() => ({}));
+  if(!res.ok) throw new Error(data.error || ('Request failed (' + res.status + ')'));
+  return data;
+}
+
+function show(inside){
+  $('auth').classList.toggle('hidden', inside);
+  $('wallet').classList.toggle('hidden', !inside);
+  $('txbox').classList.toggle('hidden', !inside);
+}
+
+async function load(){
+  const w = await call('/wallet', 'GET');
+  $('who').textContent = w.email + ' - ' + w.phone_masked;
+  $('usd').textContent = '$' + Number(w.balance_usd).toFixed(2);
+  $('kes').textContent = 'KES ' + w.balance_kes + ' (rate ' + w.rate_kes_per_usd + ' KES/USD)';
+  const list = await call('/wallet/transactions', 'GET');
+  $('txs').innerHTML = list.length ? list.map(t =>
+    '<div class="tx"><span>' + t.kind + ' - ' + t.status + '</span><span>KES ' + t.amount + '</span></div>'
+  ).join('') : '<div class="muted">None yet</div>';
+}
+
+async function run(fn){ try{ await fn(); }catch(e){ say(e.message); } }
+
+$('signup').onclick = () => run(async () => {
+  await call('/auth/register', 'POST', {email:$('email').value, phone:$('phone').value, password:$('pass').value});
+  say('Account created. Now tap Log in.', true);
+});
+
+$('login').onclick = () => run(async () => {
+  const d = await call('/auth/login', 'POST', {email:$('email').value, password:$('pass').value});
+  token = d.token; show(true); say('Welcome!', true); await load();
+});
+
+$('add').onclick = () => run(async () => {
+  const d = await call('/wallet/topup', 'POST', {amount:Number($('amount').value)});
+  say(d.message + '. Then tap Refresh.', true);
+});
+
+$('out').onclick = () => run(async () => {
+  const d = await call('/wallet/withdraw', 'POST', {amount:Number($('amount').value), password:$('wpass').value});
+  say(d.message, true); $('wpass').value = ''; await load();
+});
+
+$('refresh').onclick = () => run(load);
+$('logout').onclick = () => { token = null; show(false); say('', true); };
+</script>
+</body>
+</html>
