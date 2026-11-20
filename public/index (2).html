@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M-Pesa Dollar Wallet</title>
+<style>
+  :root{--bg:#0f1720;--card:#18232f;--text:#eef3f7;--muted:#8ea0b0;--green:#2da44e;--red:#e5534b}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--text);display:flex;justify-content:center;padding:16px}
+  .app{width:100%;max-width:420px}
+  h1{font-size:22px;margin:8px 0 16px}
+  .card{background:var(--card);border-radius:14px;padding:16px;margin-bottom:14px}
+  input,button{width:100%;padding:13px;margin-top:10px;border-radius:10px;border:1px solid #2b3a48;background:#0f1720;color:var(--text);font-size:16px}
+  button{background:var(--green);border:0;font-weight:600}
+  button.alt{background:#2b3a48}
+  .bal{font-size:34px;font-weight:700}
+  .muted{color:var(--muted);font-size:14px}
+  #msg{min-height:20px;margin-top:8px;font-size:14px}
+  .err{color:var(--red)} .ok{color:var(--green)}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>M-Pesa Dollar Wallet</h1>
+
+  <div id="auth" class="card">
+    <input id="phone" type="tel" placeholder="Phone (2547XXXXXXXX)">
+    <input id="pass" type="password" placeholder="Password">
+    <button id="login">Log in</button>
+    <button id="signup" class="alt">Create account</button>
+  </div>
+
+  <div id="wallet" class="card hidden">
+    <div class="muted">Balance</div>
+    <div class="bal" id="bal">$0.00</div>
+    <input id="amount" type="number" min="1" placeholder="Amount (KES)">
+    <button id="add">Add money (M-Pesa)</button>
+    <button id="out" class="alt">Withdraw to M-Pesa</button>
+    <button id="logout" class="alt">Log out</button>
+  </div>
+
+  <div id="msg"></div>
+</div>
+
+<script>
+// Adjust these paths if your server.js uses different ones.
+const API = {
+  signup:'/api/signup', login:'/api/login', balance:'/api/balance',
+  deposit:'/api/deposit', withdraw:'/api/withdraw'
+};
+const $ = id => document.getElementById(id);
+let token = null;
+
+function say(text, ok){ const m=$('msg'); m.textContent=text; m.className = ok?'ok':'err'; }
+
+async function call(path, body, method='POST'){
+  try{
+    const res = await fetch(path,{
+      method,
+      headers:{'Content-Type':'application/json', ...(token?{Authorization:'Bearer '+token}:{})},
+      body: method==='GET'?undefined:JSON.stringify(body||{})
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error||data.message||'Request failed ('+res.status+')');
+    return data;
+  }catch(e){ say(e.message); throw e; }
+}
+
+function show(loggedIn){
+  $('auth').classList.toggle('hidden', loggedIn);
+  $('wallet').classList.toggle('hidden', !loggedIn);
+}
+
+async function refresh(){
+  const d = await call(API.balance,null,'GET');
+  $('bal').textContent = '$' + Number(d.balance||0).toFixed(2);
+}
+
+async function enter(d){
+  token = d.token; show(true); say('Welcome!', true);
+  await refresh().catch(()=>{});
+}
+
+$('signup').onclick = async()=>{
+  try{ const d = await call(API.signup,{phone:$('phone').value.trim(),password:$('pass').value}); await enter(d);}catch{}
+};
+$('login').onclick = async()=>{
+  try{ const d = await call(API.login,{phone:$('phone').value.trim(),password:$('pass').value}); await enter(d);}catch{}
+};
+$('add').onclick = async()=>{
+  try{ await call(API.deposit,{amount:Number($('amount').value)}); say('Check your phone for the M-Pesa prompt.', true);}catch{}
+};
+$('out').onclick = async()=>{
+  try{ await call(API.withdraw,{amount:Number($('amount').value)}); say('Withdrawal requested.', true); await refresh();}catch{}
+};
+$('logout').onclick = ()=>{ token=null; show(false); say('',true); };
+</script>
+</body>
+</html>
