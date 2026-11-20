@@ -168,3 +168,19 @@ if (token) start();
 </script>
 </body>
 </html>
+// Dev only: one-time $10,000 test balance for the developer account. Never runs in production.
+function seedDevBalance() {
+  if (E.MPESA_ENV === 'production') return;
+  const email = (E.ADMIN_EMAIL || 'mwaigideon190@gmail.com').trim().toLowerCase();
+  const u = db.prepare('SELECT id FROM users WHERE email=?').get(email);
+  if (!u) return;
+  if (db.prepare("SELECT 1 FROM txs WHERE user_id=? AND kind='dev_seed'").get(u.id)) return; // already seeded
+  const amt = 10000 * 100; // balances are USD cents
+  db.transaction(() => {
+    const txId = db.prepare("INSERT INTO txs(user_id,kind,amount,kes,status,receipt) VALUES(?,'dev_seed',?,?,'success','DEV-SEED')")
+      .run(u.id, amt, Math.floor(10000 * RATE())).lastInsertRowid;
+    post(u.id, txId, 'credit', amt);
+  })();
+  console.log('Dev balance seeded: $10,000 for', email);
+}
+seedDevBalance();
