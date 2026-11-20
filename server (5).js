@@ -1,0 +1,326 @@
+require('dotenv').config();
+const express = require('express');
+const rateLimit = require('express-rate-limit');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const Database = require('better-sqlite3');
+
+const E = process.env;
+const crypto = require('crypto');
+
+// FIX 1: accept the MPESA_-prefixed names too, so variables already added in Render work.
+E.CONSUMER_KEY = E.CONSUMER_KEY || E.MPESA_CONSUMER_KEY;
+E.CONSUMER_SECRET = E.CONSUMER_SECRET || E.MPESA_CONSUMER_SECRET;
+E.PASSKEY = E.PASSKEY || E.MPESA_PASSKEY;
+E.SHORTCODE = E.SHORTCODE || E.MPESA_SHORTCODE;
+
+// Works out of the box: missing secrets are generated (set them in Render > Environment for stable logins).
+if (!E.JWT_SECRET) { E.JWT_SECRET = crypto.randomBytes(32).toString('hex'); console.warn('JWT_SECRET not set: using a temporary one, logins reset on restart.'); }
+if (!E.CALLBACK_SECRET) { E.CALLBACK_SECRET = crypto.randomBytes(16).toString('hex'); console.warn('CALLBACK_SECRET not set: using a temporary one.'); }
+const mpesaConfigured = () => !!(E.CONSUMER_KEY && E.CONSUMER_SECRET && E.PASSKEY);
+const mpesaReady = () => { if (!mpesaConfigured()) throw new Error('M-Pesa is not connected on this server yet. Add CONSUMER_KEY, CONSUMER_SECRET, PASSKEY and SHORTCODE in Render > Environment.'); };
+const BASE = E.MPESA_BASE_URL || (E.MPESA_ENV === 'production' ? 'https://api.safaricom.co.ke' : 'https://sandbox.safaricom.co.ke');
+const TOKEN_URL = `${BASE}/oauth/v1/generate?grant_type=client_credentials`; // e.g. https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials
+
+// FIX 3: set DB_PATH to a persistent disk path (e.g. /var/data/wallet.db) so data survives restarts.
+const db = new Database(E.DB_PATH || 'wallet.db');
+db.pragma('journal_mode = WAL');
+db.exec(`
+CREATE TABLE IF NOT EXISTS users(
+  id INTEGER PRIMARY KEY, email TEXT UNIQUE NOT NULL, phone TEXT UNIQUE NOT NULL, pass_hash TEXT NOT NULL,
+  balance INTEGER NOT NULL DEFAULT 0 CHECK(balance >= 0), created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS txs(
+  id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, kind TEXT NOT NULL, amount INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending', checkout_id TEXT UNIQUE, conv_id TEXT UNIQUE,
+  receipt TEXT, raw TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS ledger(
+  id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, tx_id INTEGER NOT NULL, entry TEXT NOT NULL,
+  delta INTEGER NOT NULL, balance_after INTEGER NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(tx_id, entry));
+`);
+
+// Roles and account status (safe to run on an existing database).
+const userCols = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
+if (!userCols.includes('role')) db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
+if (!userCols.includes('status')) db.exec("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'");
+db.exec(`CREATE TABLE IF NOT EXISTS admin_log(
+  id INTEGER PRIMARY KEY, admin_id INTEGER NOT NULL, action TEXT NOT NULL, target_id INTEGER, detail TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP);`);
+
+// ---- helpers ----
+function normPhone(p) {
+  p = String(p || '').replace(/[\s+-]/g, '');
+  if (/^0[17]\d{8}$/.test(p)) p = '254' + p.slice(1);
+  if (!/^254[17]\d{8}$/.test(p)) throw new Error('Invalid Kenyan phone number');
+  return p;
+}
+const amt = (v) => { const n = Number(v); if (!Number.isInteger(n) || n < 1 || n > 150000) throw new Error('Amount must be a whole number 1-150000 KES'); return n; };
+
+// Move money on the ledger atomically. UNIQUE(tx_id, entry) makes it idempotent.
+const post = db.transaction((userId, txId, entry, delta) => {
+  const exists = db.prepare('SELECT 1 FROM ledger WHERE tx_id=? AND entry=?').get(txId, entry);
+  if (exists) return false;
+  const u = db.prepare('SELECT balance FROM users WHERE id=?').get(userId);
+  const after = u.balance + delta;
+  if (after < 0) throw new Error('Insufficient funds');
+  db.prepare('UPDATE users SET balance=? WHERE id=?').run(after, userId);
+  db.prepare('INSERT INTO ledger(user_id,tx_id,entry,delta,balance_after) VALUES(?,?,?,?,?)').run(userId, txId, entry, delta, after);
+  return true;
+});
+
+// Developer/admin account is created from Render environment variables (never hardcode passwords in code).
+function seedAdmin() {
+  if (!E.ADMIN_EMAIL || !E.ADMIN_PASSWORD) return console.warn('ADMIN_EMAIL / ADMIN_PASSWORD not set: no admin account created.');
+  try {
+    if (E.ADMIN_PASSWORD.length < 8) throw new Error('ADMIN_PASSWORD must be at least 8 characters');
+    const email = E.ADMIN_EMAIL.trim().toLowerCase();
+    const phone = normPhone(E.ADMIN_PHONE);
+    const hash = bcrypt.hashSync(E.ADMIN_PASSWORD, 10);
+    const ex = db.prepare('SELECT id FROM users WHERE email=?').get(email);
+    if (ex) db.prepare("UPDATE users SET pass_hash=?, role='admin', status='active' WHERE id=?").run(hash, ex.id);
+    else db.prepare("INSERT INTO users(email,phone,pass_hash,role) VALUES(?,?,?,'admin')").run(email, phone, hash);
+    console.log('Admin account ready:', email);
+  } catch (e) { console.error('Admin seed failed:', e.message); }
+}
+seedAdmin();
+
+// ---- Daraja client ----
+let tok = { v: null, exp: 0 };
+async function token() {
+  if (tok.v && Date.now() < tok.exp) return tok.v;
+  const r = await fetch(TOKEN_URL, {
+    headers: { Authorization: 'Basic ' + Buffer.from(`${E.CONSUMER_KEY}:${E.CONSUMER_SECRET}`).toString('base64') } });
+  if (!r.ok) throw new Error('Daraja auth failed');
+  const j = await r.json();
+  tok = { v: j.access_token, exp: Date.now() + (Number(j.expires_in) - 60) * 1000 };
+  return tok.v;
+}
+async function daraja(path, body) {
+  const r = await fetch(BASE + path, { method: 'POST',
+    headers: { Authorization: 'Bearer ' + await token(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.errorMessage || `Daraja error ${r.status}`);
+  return j;
+}
+const cb = (p) => `${E.CALLBACK_BASE_URL || E.RENDER_EXTERNAL_URL}/mpesa/${p}/${E.CALLBACK_SECRET}`;
+
+// ---- app ----
+const app = express();
+
+// FIX 2: Render runs behind a proxy. Without this, all visitors share one rate-limit counter (429 errors).
+app.set('trust proxy', 1);
+
+app.use((req, res, next) => {
+  if (E.CORS_ORIGIN) {
+    res.set({ 'Access-Control-Allow-Origin': E.CORS_ORIGIN, 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' });
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+  }
+  next();
+});
+app.use(express.json());
+app.use(express.static('public'));
+app.use(rateLimit({ windowMs: 60_000, limit: 60 }));
+const strict = rateLimit({ windowMs: 15 * 60_000, limit: 10 });
+
+const auth = (req, res, next) => {
+  try {
+    req.uid = jwt.verify((req.headers.authorization || '').replace('Bearer ', ''), E.JWT_SECRET).uid;
+    const u = db.prepare('SELECT role, status FROM users WHERE id=?').get(req.uid);
+    if (!u) throw new Error('no user');
+    if (u.status !== 'active') return res.status(403).json({ error: 'Account suspended' });
+    req.role = u.role;
+    next();
+  } catch { res.status(401).json({ error: 'Unauthorized' }); }
+};
+const adminOnly = (req, res, next) => req.role === 'admin' ? next() : res.status(403).json({ error: 'Admin only' });
+const wrap = (fn) => async (req, res) => { try { await fn(req, res); } catch (e) { res.status(400).json({ error: e.message }); } };
+
+app.get('/health', (req, res) => res.json({ ok: true, mpesa: mpesaConfigured() }));
+
+// Checks the Daraja keys by requesting an access token from TOKEN_URL.
+app.get('/health/mpesa', async (req, res) => {
+  try { mpesaReady(); tok = { v: null, exp: 0 }; await token(); res.json({ ok: true, endpoint: TOKEN_URL }); }
+  catch (e) { res.status(503).json({ ok: false, error: e.message, endpoint: TOKEN_URL }); }
+});
+
+const emailOk = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
+const mask = (p) => '0' + p.slice(3, 6) + ' *** ' + p.slice(-3);
+
+app.post('/auth/register', strict, wrap(async (req, res) => {
+  const email = String(req.body.email || '').trim().toLowerCase();
+  if (!emailOk(email)) throw new Error('Enter a valid email address');
+  const pw = String(req.body.password || '');
+  if (pw.length < 8) throw new Error('Password must be at least 8 characters');
+  const phone = normPhone(req.body.phone);
+  try { db.prepare('INSERT INTO users(email,phone,pass_hash) VALUES(?,?,?)').run(email, phone, bcrypt.hashSync(pw, 10)); }
+  catch { throw new Error('This email or phone number already has an account'); }
+  res.json({ ok: true });
+}));
+
+app.post('/auth/login', strict, wrap(async (req, res) => {
+  const u = db.prepare('SELECT * FROM users WHERE email=?').get(String(req.body.email || '').trim().toLowerCase());
+  if (!u || !bcrypt.compareSync(String(req.body.password || ''), u.pass_hash)) throw new Error('Wrong email or password');
+  if (u.status !== 'active') throw new Error('Account suspended. Contact support.');
+  res.json({ token: jwt.sign({ uid: u.id }, E.JWT_SECRET, { expiresIn: '1h' }), role: u.role });
+}));
+
+app.get('/wallet', auth, wrap(async (req, res) => {
+  const u = db.prepare('SELECT email, phone, balance FROM users WHERE id=?').get(req.uid);
+  const rate = Number(E.USD_KES_RATE || 129);
+  res.json({ email: u.email, phone_masked: mask(u.phone), balance_kes: u.balance, balance_usd: +(u.balance / rate).toFixed(2), rate_kes_per_usd: rate });
+}));
+
+app.get('/wallet/transactions', auth, wrap(async (req, res) => {
+  res.json(db.prepare('SELECT id,kind,amount,status,receipt,created_at FROM txs WHERE user_id=? ORDER BY id DESC LIMIT 50').all(req.uid));
+}));
+
+// Add money: STK Push to the user's own registered phone
+app.post('/wallet/topup', auth, strict, wrap(async (req, res) => {
+  const amount = amt(req.body.amount);
+  mpesaReady();
+  const u = db.prepare('SELECT phone FROM users WHERE id=?').get(req.uid);
+  const ts = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
+  const r = await daraja('/mpesa/stkpush/v1/processrequest', {
+    BusinessShortCode: E.SHORTCODE,
+    Password: Buffer.from(E.SHORTCODE + E.PASSKEY + ts).toString('base64'),
+    Timestamp: ts, TransactionType: 'CustomerPayBillOnline', Amount: amount,
+    PartyA: u.phone, PartyB: E.SHORTCODE, PhoneNumber: u.phone, CallBackURL: cb('stk-callback'),
+    AccountReference: 'Wallet', TransactionDesc: 'Wallet top-up' });
+  if (r.ResponseCode !== '0') throw new Error(r.ResponseDescription || 'STK push failed');
+  db.prepare("INSERT INTO txs(user_id,kind,amount,checkout_id) VALUES(?,'topup',?,?)").run(req.uid, amount, r.CheckoutRequestID);
+  res.json({ message: 'Enter your M-Pesa PIN on your phone', checkout_id: r.CheckoutRequestID });
+}));
+
+// Withdraw to M-Pesa (B2C): debit first, refund if it fails
+app.post('/wallet/withdraw', auth, strict, wrap(async (req, res) => {
+  const amount = amt(req.body.amount);
+  mpesaReady();
+  const u = db.prepare('SELECT phone, pass_hash FROM users WHERE id=?').get(req.uid);
+  if (!bcrypt.compareSync(String(req.body.password || ''), u.pass_hash)) throw new Error('Wrong password. Withdrawal not started.');
+  const txId = db.prepare("INSERT INTO txs(user_id,kind,amount) VALUES(?,'withdraw',?)").run(req.uid, amount).lastInsertRowid;
+  try { post(req.uid, txId, 'debit', -amount); }
+  catch (e) { db.prepare("UPDATE txs SET status='failed' WHERE id=?").run(txId); throw e; }
+  try {
+    const r = await daraja('/mpesa/b2c/v1/paymentrequest', {
+      InitiatorName: E.INITIATOR_NAME, SecurityCredential: E.SECURITY_CREDENTIAL,
+      CommandID: 'BusinessPayment', Amount: amount, PartyA: E.SHORTCODE, PartyB: u.phone,
+      Remarks: 'Wallet withdrawal', QueueTimeOutURL: cb('b2c-timeout'), ResultURL: cb('b2c-result'), Occasion: 'Withdrawal' });
+    db.prepare('UPDATE txs SET conv_id=? WHERE id=?').run(r.OriginatorConversationID, txId);
+    res.json({ message: 'Withdrawal processing', tx_id: txId });
+  } catch (e) {
+    post(req.uid, txId, 'refund', amount);
+    db.prepare("UPDATE txs SET status='failed' WHERE id=?").run(txId);
+    throw e;
+  }
+}));
+
+// ---- Admin / agent (developer) routes ----
+const audit = (adminId, action, targetId, detail) =>
+  db.prepare('INSERT INTO admin_log(admin_id,action,target_id,detail) VALUES(?,?,?,?)').run(adminId, action, targetId || null, detail || '');
+
+app.get('/admin/summary', auth, adminOnly, wrap(async (req, res) => {
+  const s = db.prepare('SELECT COUNT(*) AS users, COALESCE(SUM(balance),0) AS total_balance FROM users').get();
+  const t = db.prepare(`SELECT
+    COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0) AS pending,
+    COALESCE(SUM(CASE WHEN status='success' AND date(created_at)=date('now') AND kind IN ('topup','agent_in') THEN amount END),0) AS in_today,
+    COALESCE(SUM(CASE WHEN status='success' AND date(created_at)=date('now') AND kind IN ('withdraw','agent_out') THEN amount END),0) AS out_today
+    FROM txs`).get();
+  res.json({ ...s, ...t });
+}));
+
+app.get('/admin/users', auth, adminOnly, wrap(async (req, res) => {
+  const q = '%' + String(req.query.q || '').trim().toLowerCase() + '%';
+  res.json(db.prepare('SELECT id,email,phone,balance,role,status,created_at FROM users WHERE lower(email) LIKE ? OR phone LIKE ? ORDER BY id DESC LIMIT 200').all(q, q));
+}));
+
+app.post('/admin/users/:id/status', auth, adminOnly, wrap(async (req, res) => {
+  const id = Number(req.params.id), st = req.body.status;
+  if (!['active', 'suspended'].includes(st)) throw new Error('Invalid status');
+  const u = db.prepare('SELECT role FROM users WHERE id=?').get(id);
+  if (!u) throw new Error('User not found');
+  if (u.role === 'admin') throw new Error('Cannot change an admin account');
+  db.prepare('UPDATE users SET status=? WHERE id=?').run(st, id);
+  audit(req.uid, 'status', id, st);
+  res.json({ ok: true });
+}));
+
+app.post('/admin/users/:id/reset-password', auth, adminOnly, wrap(async (req, res) => {
+  const id = Number(req.params.id), pw = String(req.body.password || '');
+  if (pw.length < 8) throw new Error('Password must be at least 8 characters');
+  const u = db.prepare('SELECT role FROM users WHERE id=?').get(id);
+  if (!u) throw new Error('User not found');
+  if (u.role === 'admin') throw new Error('Change the admin password in Render (ADMIN_PASSWORD)');
+  db.prepare('UPDATE users SET pass_hash=? WHERE id=?').run(bcrypt.hashSync(pw, 10), id);
+  audit(req.uid, 'reset_password', id, '');
+  res.json({ ok: true });
+}));
+
+app.get('/admin/transactions', auth, adminOnly, wrap(async (req, res) => {
+  res.json(db.prepare('SELECT t.id,t.kind,t.amount,t.status,t.receipt,t.created_at,u.email FROM txs t JOIN users u ON u.id=t.user_id ORDER BY t.id DESC LIMIT 100').all());
+}));
+
+app.get('/admin/log', auth, adminOnly, wrap(async (req, res) => {
+  res.json(db.prepare('SELECT l.id,l.action,l.target_id,l.detail,l.created_at,a.email AS admin FROM admin_log l JOIN users a ON a.id=l.admin_id ORDER BY l.id DESC LIMIT 100').all());
+}));
+
+// Agent cash-in (customer hands you cash, wallet is credited) and cash-out (you hand cash, wallet is debited).
+const agentMove = (kind) => wrap(async (req, res) => {
+  const amount = amt(req.body.amount);
+  const phone = normPhone(req.body.phone);
+  const u = db.prepare('SELECT id FROM users WHERE phone=?').get(phone);
+  if (!u) throw new Error('No account with that phone number');
+  const note = String(req.body.note || '').slice(0, 100);
+  db.transaction(() => {
+    const txId = db.prepare("INSERT INTO txs(user_id,kind,amount,status) VALUES(?,?,?,'success')").run(u.id, kind, amount).lastInsertRowid;
+    post(u.id, txId, kind === 'agent_in' ? 'credit' : 'debit', kind === 'agent_in' ? amount : -amount);
+    audit(req.uid, kind, u.id, `${amount} KES ${note}`);
+  })();
+  res.json({ ok: true });
+});
+app.post('/admin/agent/cash-in', auth, adminOnly, agentMove('agent_in'));
+app.post('/admin/agent/cash-out', auth, adminOnly, agentMove('agent_out'));
+
+// ---- Daraja callbacks (always ACK with 200) ----
+const guard = (req, res, next) => req.params.secret === E.CALLBACK_SECRET ? next() : res.sendStatus(404);
+const ack = (res) => res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
+
+app.post('/mpesa/stk-callback/:secret', guard, (req, res) => {
+  try {
+    const c = req.body.Body.stkCallback;
+    const tx = db.prepare("SELECT * FROM txs WHERE checkout_id=? AND kind='topup'").get(c.CheckoutRequestID);
+    if (tx && tx.status === 'pending') {
+      db.transaction(() => {
+        if (c.ResultCode === 0) {
+          const items = c.CallbackMetadata.Item;
+          const receipt = (items.find(i => i.Name === 'MpesaReceiptNumber') || {}).Value;
+          const paid = (items.find(i => i.Name === 'Amount') || {}).Value;
+          if (Number(paid) === tx.amount) {
+            post(tx.user_id, tx.id, 'credit', tx.amount);
+            db.prepare("UPDATE txs SET status='success', receipt=?, raw=? WHERE id=?").run(receipt, JSON.stringify(c), tx.id);
+          } else db.prepare("UPDATE txs SET status='review', raw=? WHERE id=?").run(JSON.stringify(c), tx.id);
+        } else db.prepare("UPDATE txs SET status='failed', raw=? WHERE id=?").run(JSON.stringify(c), tx.id);
+      })();
+    }
+  } catch (e) { console.error('stk-callback', e.message); }
+  ack(res);
+});
+
+app.post('/mpesa/b2c-result/:secret', guard, (req, res) => {
+  try {
+    const r = req.body.Result;
+    const tx = db.prepare("SELECT * FROM txs WHERE conv_id=? AND kind='withdraw'").get(r.OriginatorConversationID);
+    if (tx && tx.status === 'pending') {
+      db.transaction(() => {
+        if (r.ResultCode === 0) db.prepare("UPDATE txs SET status='success', receipt=?, raw=? WHERE id=?").run(r.TransactionID, JSON.stringify(r), tx.id);
+        else { post(tx.user_id, tx.id, 'refund', tx.amount); db.prepare("UPDATE txs SET status='failed', raw=? WHERE id=?").run(JSON.stringify(r), tx.id); }
+      })();
+    }
+  } catch (e) { console.error('b2c-result', e.message); }
+  ack(res);
+});
+
+// Timeout = outcome unknown. Do NOT auto-refund; verify with Transaction Status or the M-Pesa statement.
+app.post('/mpesa/b2c-timeout/:secret', guard, (req, res) => { console.warn('B2C timeout', JSON.stringify(req.body)); ack(res); });
+
+app.listen(E.PORT || 3000, () => console.log(`Wallet API on :${E.PORT || 3000} (${E.MPESA_ENV || 'sandbox'})`));
