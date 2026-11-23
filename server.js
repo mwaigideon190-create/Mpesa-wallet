@@ -522,7 +522,9 @@ app.get('/admin/accounts', auth, adminOnly, wrap(async (req, res) => {
   const c = db.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(balance),0) AS total FROM users WHERE role NOT IN ('treasury','house')").get();
   const list = [{ key: 'treasury', name: 'Treasury (Tradecoin house account)', balance: treasuryBal() }];
   for (const k of Object.keys(HOUSE)) list.push({ key: k, name: HOUSE[k], balance: db.prepare('SELECT balance FROM users WHERE id=?').get(houseRow(k).id).balance });
-  res.json({ accounts: list, clients: { count: c.n, total: c.total } });
+  const held = db.prepare('SELECT balance FROM users WHERE id=?').get(houseRow('escrow').id).balance;
+  const demo = db.prepare('SELECT k, bal FROM mk_demo_acct ORDER BY k').all().map((r) => ({ key: r.k, name: r.k === 'coinvalue' ? 'Tradecoin value' : r.k === 'moneytransfer' ? 'Money transfer' : r.k === 'fees' ? 'Fees' : 'Held for open trades', balance: r.bal }));
+  res.json({ accounts: list, clients: { count: c.n, total: c.total }, held, demo });
 }));
 app.post('/admin/transfer', auth, adminOnly, wrap(async (req, res) => {
   const amount = cents(req.body.amount, 0.01, Number(E.TRANSFER_MAX_USD || 1000)); // USD cents
@@ -711,36 +713,85 @@ app.post('/admin/sim', auth, adminOnly, wrap(async (req, res) => {
 }));
 
 
-// ---- Tradecoin chart trading (/mk): Demo account with $10 practice money (refillable). Follows the same admin-steered market as /game/market. ----
-// Live-money trading is not switched on here: /mk/trade, /mk/me and /mk/close only serve the Demo account.
+// ---- Tradecoin chart trading (/mk): Demo (practice money) and Live (real wallet). Follows the same admin-steered market as /game/market. ----
+// MONEY FLOW (automatic, same for Demo and Live; Demo uses its own practice copies of the house accounts):
+//  Open : the client pays stake + 35% commission. Commission goes to the Fees account; the stake is held (escrow) until the trade closes.
+//  Close: the stake goes back to the client, then the result P (the win, or the loss capped at what the client holds) is moved:
+//     the market moves by dV = direction x (+1 win / -1 loss) x P   (Buy+win or Sell+loss: value UP; Buy+loss or Sell+win: value DOWN)
+//     client LOSES: client -P -> Money transfer +P          client WINS: Money transfer -P -> client +P
+//     value UP: Money transfer -dV -> Tradecoin value +dV    value DOWN: Tradecoin value -dV -> Money transfer +dV
+//  So client + Tradecoin value + Money transfer always add up to zero. Only the admin adds money to Tradecoin value by hand (Transfer tab).
 const MK = { min: 50, max: 6000, fee: 0.35, start: 1000, maxOpen: 20 }; // cents: stake $0.50 to $60, 35% commission, demo wallet $10
+const SEQMAX = Math.max(...SEQ);
 db.exec(`CREATE TABLE IF NOT EXISTS mk_demo(user_id INTEGER PRIMARY KEY, bal INTEGER NOT NULL DEFAULT 1000);
+CREATE TABLE IF NOT EXISTS mk_demo_acct(k TEXT PRIMARY KEY, bal INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS mk_trades(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, dir INTEGER NOT NULL, stake INTEGER NOT NULL, dur INTEGER NOT NULL,
   entry REAL NOT NULL, start INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'open', result INTEGER NOT NULL DEFAULT 0, closed_at INTEGER);
 CREATE INDEX IF NOT EXISTS idx_mk_user ON mk_trades(user_id, id DESC);`);
+try { db.exec("ALTER TABLE mk_trades ADD COLUMN mode TEXT NOT NULL DEFAULT 'demo'"); } catch (e) { /* already there */ }
+const MK_ACCTS = ['coinvalue', 'moneytransfer', 'fees', 'escrow'];
+MK_ACCTS.forEach((k) => db.prepare('INSERT OR IGNORE INTO mk_demo_acct(k) VALUES(?)').run(k));
+// Live escrow: holds the stakes of open trades. A house account the admin cannot transfer from.
+if (!houseRow('escrow')) db.prepare("INSERT INTO users(email,phone,pass_hash,role) VALUES('escrow@system.local','254000000020',?,'house')").run(bcrypt.hashSync(crypto.randomBytes(24).toString('hex'), 10));
 const mkLimit = rateLimit({ windowMs: 60_000, limit: 240 });
-const mkDemoOnly = (m) => { if (m === 'real') throw new Error('Live trading is not switched on on this server yet. Please use the Demo account.'); };
+const mkModeOf = (m) => m === 'real' ? 'live' : 'demo';
 function mkBal(uid) {
   const r = db.prepare('SELECT bal FROM mk_demo WHERE user_id=?').get(uid);
   if (r) return r.bal;
   db.prepare('INSERT INTO mk_demo(user_id,bal) VALUES(?,?)').run(uid, MK.start); return MK.start;
 }
-function mkMe(uid) {
-  const trades = db.prepare('SELECT id,status,dir,stake,dur,start,entry,result FROM mk_trades WHERE user_id=? ORDER BY id DESC LIMIT 30').all(uid)
+const accId = (a, uid) => a === 'client' ? uid : a === 'treasury' ? TID() : houseRow(a).id;
+const accBal = (mode, a, uid) => mode === 'demo'
+  ? (a === 'client' ? mkBal(uid) : db.prepare('SELECT bal FROM mk_demo_acct WHERE k=?').get(a).bal)
+  : db.prepare('SELECT balance FROM users WHERE id=?').get(accId(a, uid)).balance;
+// One-sided move on an account. Always used in pairs inside a db.transaction so the books balance.
+function accAdd(mode, a, uid, delta, note) {
+  if (!delta) return;
+  if (mode === 'demo') {
+    if (a === 'client') { mkBal(uid); db.prepare('UPDATE mk_demo SET bal=bal+? WHERE user_id=?').run(delta, uid); }
+    else db.prepare('UPDATE mk_demo_acct SET bal=bal+? WHERE k=?').run(delta, a);
+    return;
+  }
+  const id = accId(a, uid);
+  const kind = a === 'client' ? (String(note).startsWith('trade open') ? 'chart_open' : 'chart_close') : (delta < 0 ? 'mk_out' : 'mk_in'); // the wallet history shows chart_open / chart_close by name
+  const tx = db.prepare("INSERT INTO txs(user_id,kind,amount,status,receipt) VALUES(?,?,?,'success',?)").run(id, kind, Math.abs(delta), String(note).slice(0, 100)).lastInsertRowid;
+  post(id, tx, delta < 0 ? 'debit' : 'credit', delta);
+}
+// Pay from the Money transfer account. If it is short, the Treasury covers the gap (Live); anything still short is skipped (never goes negative).
+function mtPay(mode, uid, to, amt, note) {
+  if (amt <= 0) return 0;
+  let have = accBal(mode, 'moneytransfer', uid);
+  if (mode === 'live' && have < amt) {
+    const c = Math.min(amt - have, Math.max(0, treasuryBal() - openPayouts()));
+    if (c > 0) { accAdd(mode, 'treasury', uid, -c, 'cover ' + note); accAdd(mode, 'moneytransfer', uid, c, 'cover ' + note); have += c; }
+  }
+  const out = mode === 'demo' ? amt : Math.min(amt, have);
+  accAdd(mode, 'moneytransfer', uid, -out, note); accAdd(mode, to, uid, out, note);
+  return out;
+}
+function mkMe(uid, mode) {
+  mode = mode || 'demo';
+  const trades = db.prepare('SELECT id,status,dir,stake,dur,start,entry,result FROM mk_trades WHERE user_id=? AND mode=? ORDER BY id DESC LIMIT 30').all(uid, mode)
     .map(t => ({ ...t, stake: t.stake / 100, result: t.result / 100 }));
   let b = 0, s = 0; for (const t of trades) if (t.status === 'open') { if (t.dir > 0) b++; else s++; }
   SIM.cnt.set(uid, { b, s, t: Date.now() }); // feeds the AI market control the same way /game/market does
-  return { bal: mkBal(uid) / 100, now: Date.now(), trades };
+  return { bal: accBal(mode, 'client', uid) / 100, now: Date.now(), trades };
 }
-// Close a trade at the current price. The multiplier steps up while the trade runs; a win pays stake x multiplier, a loss costs it (never more than the wallet holds).
+// Close a trade at the current price. The multiplier steps up while the trade runs; a win pays stake x multiplier, a loss costs it (never more than the client holds).
 function mkSettle(id) {
   db.transaction(() => {
     const t = db.prepare("SELECT * FROM mk_trades WHERE id=? AND status='open'").get(id); if (!t) return;
+    const mode = t.mode, uid = t.user_id, note = 'trade #' + id;
     const now = Date.now(), frac = Math.min(1, (now - t.start) / (t.dur * 1000)), mult = SEQ[Math.min(SN - 1, Math.floor(frac * SN))];
-    const val = Math.round(t.stake * mult), win = t.dir * (SIM.V - t.entry) >= 0, bal = mkBal(t.user_id);
-    const p = win ? val : -Math.min(val, t.stake + bal);
-    db.prepare('UPDATE mk_demo SET bal=? WHERE user_id=?').run(bal + t.stake + p, t.user_id);
-    db.prepare("UPDATE mk_trades SET status='closed', result=?, closed_at=? WHERE id=?").run(p, now, id);
+    const val = Math.round(t.stake * mult), win = t.dir * (SIM.V - t.entry) >= 0;
+    accAdd(mode, 'escrow', uid, -t.stake, note + ' stake back'); accAdd(mode, 'client', uid, t.stake, note + ' stake back');
+    const P = win ? val : Math.min(val, accBal(mode, 'client', uid)), dV = t.dir * (win ? 1 : -1) * P;
+    if (!win) { accAdd(mode, 'client', uid, -P, note + ' loss'); accAdd(mode, 'moneytransfer', uid, P, note + ' loss'); }   // loss goes to Money transfer
+    if (dV < 0) { const take = mode === 'demo' ? -dV : Math.min(-dV, accBal(mode, 'coinvalue', uid)); accAdd(mode, 'coinvalue', uid, -take, note + ' value down'); accAdd(mode, 'moneytransfer', uid, take, note + ' value down'); }
+    let result = -P;
+    if (win) result = mtPay(mode, uid, 'client', P, note + ' win');                                                          // win is paid by Money transfer
+    if (dV > 0) mtPay(mode, uid, 'coinvalue', dV, note + ' value up');                                                       // Money transfer raises Tradecoin value
+    db.prepare("UPDATE mk_trades SET status='closed', result=?, closed_at=? WHERE id=?").run(result, now, id);
   })();
 }
 setInterval(() => {
@@ -755,33 +806,40 @@ app.get('/mk/feed', auth, mkLimit, wrap(async (req, res) => {
   const i = since - SIM.TB;
   res.json({ n, a: SIM.a.slice(i), H: SIM.H.slice(i), L: SIM.L.slice(i), st });
 }));
-app.get('/mk/me', auth, mkLimit, wrap(async (req, res) => { mkDemoOnly(req.query.m); res.json(mkMe(req.uid)); }));
+app.get('/mk/me', auth, mkLimit, wrap(async (req, res) => { res.json(mkMe(req.uid, mkModeOf(req.query.m))); }));
 app.post('/mk/trade', auth, mkLimit, wrap(async (req, res) => {
-  mkDemoOnly(req.body.m);
+  const mode = mkModeOf(req.body.m);
+  if (req.role === 'treasury' || req.role === 'house') throw new Error('This account cannot trade');
   const dir = req.body.dir === 'buy' ? 1 : req.body.dir === 'sell' ? -1 : 0; if (!dir) throw new Error('Choose Buy or Sell');
   const stake = Math.round(Number(req.body.stake) * 100); if (!Number.isFinite(stake) || stake < MK.min || stake > MK.max) throw new Error('Stake must be between $0.50 and $60');
   const dur = Math.round(Number(req.body.dur)); if (!(dur >= 10 && dur <= 90)) throw new Error('Choose a time from 10 to 90 seconds');
   if (!SIM.OPEN || SIM.FROZEN) throw new Error('Trading is closed while the admin adds value.');
   db.transaction(() => {
-    if (db.prepare("SELECT COUNT(*) AS c FROM mk_trades WHERE user_id=? AND status='open'").get(req.uid).c >= MK.maxOpen) throw new Error('Too many open trades. Close one first.');
-    const fee = Math.round(stake * MK.fee), bal = mkBal(req.uid);
-    if (bal < stake + fee) throw new Error('Not enough demo balance. Tap Refresh demo $10.');
-    db.prepare('UPDATE mk_demo SET bal=? WHERE user_id=?').run(bal - stake - fee, req.uid);
-    db.prepare('INSERT INTO mk_trades(user_id,dir,stake,dur,entry,start) VALUES(?,?,?,?,?,?)').run(req.uid, dir, stake, dur, SIM.V, Date.now());
+    if (db.prepare("SELECT COUNT(*) AS c FROM mk_trades WHERE user_id=? AND mode=? AND status='open'").get(req.uid, mode).c >= MK.maxOpen) throw new Error('Too many open trades. Close one first.');
+    const fee = Math.round(stake * MK.fee);
+    if (accBal(mode, 'client', req.uid) < stake + fee) throw new Error(mode === 'demo' ? 'Not enough demo balance. Tap Refresh demo $10.' : 'Not enough balance. Please top up.');
+    if (mode === 'live') { // the house must be able to cover the biggest possible win of every open live trade
+      const reserved = db.prepare("SELECT COALESCE(SUM(stake),0) AS s FROM mk_trades WHERE status='open' AND mode='live'").get().s * SEQMAX;
+      if (accBal('live', 'moneytransfer') + Math.max(0, treasuryBal() - openPayouts()) < reserved + stake * SEQMAX) throw new Error('This trade cannot be covered right now. Try a smaller stake.');
+    }
+    const note = 'trade open';
+    accAdd(mode, 'client', req.uid, -(stake + fee), note); accAdd(mode, 'escrow', req.uid, stake, note); accAdd(mode, 'fees', req.uid, fee, note + ' commission');
+    db.prepare('INSERT INTO mk_trades(user_id,dir,stake,dur,entry,start,mode) VALUES(?,?,?,?,?,?,?)').run(req.uid, dir, stake, dur, SIM.V, Date.now(), mode);
   })();
-  res.json(mkMe(req.uid));
+  res.json(mkMe(req.uid, mode));
 }));
 app.post('/mk/close', auth, mkLimit, wrap(async (req, res) => {
-  const t = db.prepare("SELECT id FROM mk_trades WHERE id=? AND user_id=? AND status='open'").get(Number(req.body.id), req.uid);
+  const t = db.prepare("SELECT id, mode FROM mk_trades WHERE id=? AND user_id=? AND status='open'").get(Number(req.body.id), req.uid);
   if (!t) throw new Error('That trade is already closed');
-  mkSettle(t.id); res.json(mkMe(req.uid));
+  mkSettle(t.id); res.json(mkMe(req.uid, t.mode));
 }));
 // Refresh the Demo wallet back to $10 (practice money only). Open demo trades are cancelled first.
 app.post('/mk/test', auth, mkLimit, wrap(async (req, res) => {
-  mkDemoOnly(req.body.m);
+  if (mkModeOf(req.body.m) !== 'demo') throw new Error('Refresh is only for the Demo account');
   if (req.body.act !== 'reset') throw new Error('Not available');
   db.transaction(() => {
-    db.prepare("UPDATE mk_trades SET status='closed', result=0, closed_at=? WHERE user_id=? AND status='open'").run(Date.now(), req.uid);
+    for (const t of db.prepare("SELECT id, stake FROM mk_trades WHERE user_id=? AND mode='demo' AND status='open'").all(req.uid)) { accAdd('demo', 'escrow', req.uid, -t.stake, 'refund'); accAdd('demo', 'client', req.uid, t.stake, 'refund'); }
+    db.prepare("UPDATE mk_trades SET status='closed', result=0, closed_at=? WHERE user_id=? AND mode='demo' AND status='open'").run(Date.now(), req.uid);
     mkBal(req.uid); db.prepare('UPDATE mk_demo SET bal=? WHERE user_id=?').run(MK.start, req.uid);
   })();
   res.json(mkMe(req.uid));
