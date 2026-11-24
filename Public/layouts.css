@@ -1,0 +1,11 @@
+/* Trade coin: 10 layout versions, chosen in Admin > Site. Applied as <html data-layout="N">. 1 = original look. */
+html[data-layout="2"] .wrap{max-width:1500px}
+html[data-layout="3"] .wrap{padding:8px}html[data-layout="3"] body{font-size:13px}html[data-layout="3"] header{padding:8px 14px}html[data-layout="3"] .tabs button{padding:8px}
+html[data-layout="4"] .wrap{max-width:560px}html[data-layout="4"] header{justify-content:center;text-align:center}
+@media(min-width:701px){html[data-layout="5"] .wrap{display:grid;grid-template-columns:190px 1fr;gap:16px;max-width:1300px;align-items:start}
+html[data-layout="5"] .tabs{flex-direction:column;grid-row:1/span 30;position:sticky;top:10px}html[data-layout="5"] .tabs button{text-align:left}html[data-layout="5"] .wrap>.panel{grid-column:2}}
+html[data-layout="6"]{--accent:#d4af37;--buy:#d4af37;--bg:#000;--hdr:#000;--card:#0c0c0c;--tab:#141414}html[data-layout="6"] header h1,html[data-layout="6"] header h1 span{color:#d4af37}
+html[data-layout="7"]{--accent:#a855f7;--buy:#22d3ee;--sell:#f43f5e;--bg:#07040f;--hdr:#0d0820;--card:#120a2a;--tab:#1c1040}html[data-layout="7"] .card,html[data-layout="7"] header{box-shadow:0 0 18px #a855f733}
+html[data-layout="8"]{--bg:#f3f3f6;--hdr:#fff;--card:#fff;--tab:#dcdce3;--text:#1b1b1f;--tm:55%;color-scheme:light}
+html[data-layout="9"] .wrap{max-width:900px;padding:22px}html[data-layout="9"] .tabs,html[data-layout="9"] .card,html[data-layout="9"] section,html[data-layout="9"] dialog{border-radius:22px}html[data-layout="9"] .tabs button{border-radius:22px}
+html[data-layout="10"]{--accent:#22c55e;--buy:#22c55e;--bg:#000;--hdr:#000;--card:#050805;--tab:#0a120a;--text:#b6f5c6}html[data-layout="10"] body{font-family:ui-monospace,Menlo,Consolas,monospace}html[data-layout="10"] *{border-radius:2px!important}
