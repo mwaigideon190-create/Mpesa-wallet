@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>window.__bip=null;addEventListener("beforeinstallprompt",function(e){e.preventDefault();window.__bip=e;});</script><link rel="manifest" href="admin.webmanifest"><meta name="theme-color" content="#000000"><link rel="apple-touch-icon" href="admin-icon-192.png">
+<meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">
+<title>Trade coin Admin</title>
+<style>
+  :root { --bg:#000000; --card:#0a0a0a; --line:#2b2b2b; --text:#ffffff; --mute:#a8a8a8; --green:#22c55e; --red:#ef4444; --amber:#a855f7; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.4 system-ui,-apple-system,Roboto,sans-serif; }
+  main { max-width:640px; margin:0 auto; padding:16px; }
+  h1 { font-size:22px; margin:8px 0 14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px; }
+  input { width:100%; padding:12px; margin:6px 0; border-radius:8px; border:1px solid var(--line); background:#000000; color:var(--text); font-size:16px; }
+  button { padding:11px 14px; border:0; border-radius:8px; background:#1a1a1a; color:var(--text); font-size:15px; font-weight:600; cursor:pointer; }
+  button.go { background:var(--green); } button.bad { background:var(--red); } button.warn { background:var(--amber); color:#111; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; }
+  .row > * { flex:1; }
+  nav { display:flex; gap:6px; margin-bottom:12px; overflow-x:auto; }
+  .row button.on{background:var(--green)} nav button { flex:none; } nav button.on { background:var(--green); }
+  .err { color:#ff8a85; margin:8px 0; min-height:1.2em; } .ok { color:#6fd68a; }
+  .big { font-size:26px; font-weight:700; } .mute { color:var(--mute); font-size:14px; }
+  .tag { display:inline-block; padding:2px 8px; border-radius:99px; font-size:12px; background:#1a1a1a; }
+  .tag.suspended, .tag.failed { background:var(--red); } .tag.success, .tag.active { background:#1e6b3a; } .tag.pending, .tag.review { background:var(--amber); color:#111; }
+  .hide { display:none; }
+  .badge { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 14px; border-radius:8px; border:2px solid; margin:0 0 12px; font-weight:800; font-size:1.05rem; letter-spacing:.08em; }
+  .badge small { font-weight:600; letter-spacing:0; font-size:.82rem; text-align:right; }
+  .badge.demo { background:#3a2a00; color:#ffd166; border-color:#ffb020; } .badge.live { background:#3b0a0a; color:#ff9a9a; border-color:#ff4d4d; } .badge.both { background:#2a1450; color:#d3b8ff; border-color:#9b6bff; }
+  .aibox { background:#000000; border:1px solid var(--line); border-radius:8px; padding:10px; margin:8px 0; font-size:14px; } .aibox b { color:#ffd166; }
+  select { color:var(--text); }
+
+  body{background:#000 radial-gradient(1200px 500px at 50% -10%,#1a1a1a,#000 60%) no-repeat}
+  button{border:1px solid #2b2b2b} button.go{background:#fff;color:#000} nav button.on,.row button.on{background:#fff;color:#000}
+  .card{border-top:2px solid #fff} .card:nth-of-type(4n+2){border-top-color:#3b82f6} .card:nth-of-type(4n+3){border-top-color:#a855f7} .card:nth-of-type(4n){border-top-color:#22c55e}
+  .brand{display:flex;align-items:center;gap:12px;margin:8px 0 14px}.brand img{width:46px;height:46px;border-radius:50%;object-fit:cover;border:2px solid #fff;box-shadow:0 0 0 3px #000,0 0 0 4px #a855f7}
+  .brand h1{margin:0;font-family:"Brush Script MT","Segoe Script",cursive;font-size:30px;font-weight:400;letter-spacing:.5px}
+  #intro{position:fixed;inset:0;z-index:99;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;transition:opacity .8s}
+  #intro.out{opacity:0;pointer-events:none}
+  #intro:before{content:"";position:absolute;inset:0;z-index:0;background:repeating-linear-gradient(0deg,#ffffff05 0 1px,transparent 1px 4px);animation:scan 6s linear infinite}
+  @keyframes scan{to{background-position:0 80px}}
+  .iw{position:relative;width:170px;height:170px;display:grid;place-items:center}
+  .iw img{width:140px;height:140px;border-radius:50%;object-fit:cover;border:2px solid #fff;animation:pop 1.2s cubic-bezier(.2,1.4,.4,1) both}
+  .iw i{position:absolute;inset:0;border-radius:50%;border:2px solid transparent;border-top-color:#a855f7;border-bottom-color:#3b82f6;animation:spin 3s linear infinite}
+  .iw i+i{inset:12px;border-top-color:#22c55e;border-bottom-color:#ef4444;animation-duration:2s;animation-direction:reverse}
+  @keyframes spin{to{transform:rotate(360deg)}} @keyframes pop{from{transform:scale(.2);opacity:0}}
+  #iword{position:relative;z-index:3;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision;font-weight:700;text-shadow:0 0 1px #000,0 2px 12px #000;height:84px;margin-top:26px;display:grid;place-items:center;text-align:center;padding:0 18px;font-family:"Brush Script MT","Segoe Script",cursive;font-size:clamp(28px,8vw,46px);color:#fff}
+  #iword span{animation:wp 1.5s ease both}
+  @keyframes wp{0%{transform:translateY(14px);opacity:0}18%{transform:none;opacity:1}82%{transform:none;opacity:1}100%{transform:translateY(-10px);opacity:0}}
+  #ibar{width:180px;height:3px;background:#222;margin-top:14px;border-radius:3px;overflow:hidden}#ibar b{display:block;height:100%;width:0;background:linear-gradient(90deg,#3b82f6,#a855f7,#22c55e);animation:ld 6.5s linear forwards}@keyframes ld{to{width:100%}}
+  #iskip{position:absolute;bottom:22px;background:none;border:0;color:#777;font-size:13px}
+</style>
+</head>
+<body>
+<div id="intro"><div class="iw"><i></i><i></i><img src="admin-logo.png" alt="" onerror="this.onerror=null;this.src='data:image/jpeg;base64,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'"></div><div id="iword"></div><div id="ibar"><b></b></div><button id="iskip" type="button">Tap to skip</button></div>
+<script>(function(){var W=["Welcome, Your Highness","Chief Developer of Trade coin","The Architect","Sovereign of the Coin","Master of the Market","Your Majesty of Code","The Founder","All Systems Bow to You","Trade coin Awaits"],i=0,el=document.getElementById("iword"),it=document.getElementById("intro");
+function n(){if(i>=W.length)return end();el.innerHTML="";var s=document.createElement("span");s.textContent=W[i++];el.appendChild(s);t=setTimeout(n,1500)}
+function end(){clearTimeout(t);it.classList.add("out");setTimeout(function(){it.remove()},900)}
+var t=setTimeout(n,500);it.addEventListener("click",end);setTimeout(end,14000)})()</script>
+<main>
+  <div class="brand"><img src="admin-logo.png" alt="Chief developer" onerror="this.onerror=null;this.src='data:image/jpeg;base64,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'"><h1>Trade coin Admin</h1></div>
+
+  <div id="login" class="card">
+    <input id="email" type="email" placeholder="Admin email" autocomplete="username">
+    <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+    <button class="go" id="loginBtn" style="width:100%;margin-top:8px">Log in</button>
+    <div class="err" id="loginErr"></div>
+  </div>
+
+  <div id="app" class="hide">
+    <nav id="nav">
+      <button data-v="summary" class="on">Summary</button>
+      <button data-v="users">Users</button>
+      <button data-v="agent">Agent</button>
+      <button data-v="transfer">Transfer</button>
+      <button data-v="treasury">Treasury</button>
+      <button data-v="market">Market</button>
+      <button data-v="txs">Transactions</button>
+      <button data-v="log">Log</button>
+      <button data-v="site">Site</button>
+      <button id="logout">Log out</button>
+    </nav>
+    <div class="err" id="msg"></div>
+    <div id="view"></div>
+  </div>
+</main>
+
+<script>
+let token = null;
+try { token = localStorage.getItem('adminToken') || sessionStorage.getItem('adminToken'); } catch (e) {}
+
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+// The server stores money as USD cents.
+const usd = (c) => '$' + (Number(c || 0) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const when = (t) => esc(String(t || '').slice(0, 16));
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token } }).catch(() => { throw new Error(NOSRV); });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'Error ' + r.status);
+  return j;
+}
+const NOSRV = 'Cannot reach the server. Open this page from your site address (for example https://your-app.onrender.com/admin.html), not from the Downloads folder.';
+const post = (path, body) => api(path, { method: 'POST', body: JSON.stringify(body) });
+const say = (t, good) => { const m = $('#msg'); m.textContent = t || ''; m.className = 'err' + (good ? ' ok' : ''); };
+
+async function login() {
+  $('#loginErr').textContent = '';
+  try {
+    const r = await fetch('/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: $('#email').value.trim().toLowerCase(), password: $('#pw').value }) }).catch(() => { throw new Error(NOSRV); });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'Login failed');
+    if (j.role !== 'admin') throw new Error('This account is not an admin');
+    token = j.token;
+    try { localStorage.setItem('adminToken', token); } catch (e) {}
+    start();
+  } catch (e) { $('#loginErr').textContent = e.message; }
+}
+
+async function start() {
+  try { await api('/admin/summary'); } catch (e) { token = null; try { localStorage.removeItem('adminToken'); sessionStorage.removeItem('adminToken'); } catch (x) {} return; }
+  $('#login').classList.add('hide'); $('#app').classList.remove('hide');
+  show('summary');
+}
+
+function show(v) {
+  if (v !== 'market') clearInterval(admTimer);
+  document.querySelectorAll('#nav button[data-v]').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+  say('');
+  ({ summary, users, agent, transfer, treasury, market, txs, log, site }[v])().catch((e) => say(e.message));
+}
+
+
+/* Site editor: layout (1-10), brand title, colours, text edits, hidden tabs, custom CSS. Saved to the server and applied to the public page. */
+const LAYOUTS=['Classic','Wide pro','Compact','Centered app','Sidebar','Gold luxe','Neon','Light clean','Rounded cards','Terminal'];
+async function site() {
+  const c = await fetch('/site/config').then((r) => r.json()).catch(() => ({ layout: 1 }));
+  const v = c.vars || {}, col = (k, d) => `<label class="mute">${k}<input type="color" data-var="${k}" value="${esc(v[k] || d)}" style="height:44px;padding:2px"></label>`;
+  $('#view').innerHTML = `<div class="card"><b>Layout version</b><div class="mute">Pick one of 10. Opens on the public page for everyone.</div>
+    <div class="row" id="lay" style="margin-top:8px">${LAYOUTS.map((n, i) => `<button data-l="${i + 1}" class="${(c.layout || 1) === i + 1 ? 'on' : ''}" style="flex:1 1 44%">${i + 1}. ${n}</button>`).join('')}</div>
+    <a href="/?layout=1" id="prev" target="_blank" class="mute" style="display:block;margin-top:8px">Preview selected layout ↗</a></div>
+    <div class="card"><b>Page title</b><input id="stitle" value="${esc(c.title || '')}" placeholder="Trade coin"></div>
+    <div class="card"><b>Colours</b><div class="row">${col('accent', '#2b6aee')}${col('buy', '#2b6aee')}${col('sell', '#ea3b44')}${col('bg', '#18171a')}</div></div>
+    <div class="card"><b>Edit any text</b><div class="mute">One per line: CSS selector | new text. Example: header h1 | Trade coin</div>
+    <textarea id="stexts" rows="5" style="width:100%;background:#000;color:#fff;border:1px solid var(--line);border-radius:8px;padding:10px">${esc((c.texts || []).map((r) => r.sel + ' | ' + r.text).join('\n'))}</textarea></div>
+    <div class="card"><b>Hide sections</b><div class="row">${['quotes', 'charts', 'strategies', 'glossary'].map((n) => `<label style="flex:1 1 40%"><input type="checkbox" data-hide="${n}" style="width:auto" ${(c.hideTabs || []).includes(n) ? 'checked' : ''}> ${n}</label>`).join('')}</div></div>
+    <div class="card"><b>Custom CSS (advanced)</b><textarea id="scss" rows="5" style="width:100%;background:#000;color:#fff;border:1px solid var(--line);border-radius:8px;padding:10px">${esc(c.css || '')}</textarea></div>
+    <button class="go" style="width:100%" id="ssave">Save and publish to site</button>`;
+  let lay = c.layout || 1; const pv = () => { $('#prev').href = '/?layout=' + lay; };
+  pv(); $('#lay').onclick = (e) => { const b = e.target.closest('button[data-l]'); if (!b) return; lay = +b.dataset.l; document.querySelectorAll('#lay button').forEach((x) => x.classList.toggle('on', x === b)); pv(); };
+  $('#ssave').onclick = async () => {
+    const vars = {}; document.querySelectorAll('[data-var]').forEach((i) => { if (i.value !== i.defaultValue || v[i.dataset.var]) vars[i.dataset.var] = i.value; });
+    const texts = $('#stexts').value.split('\n').map((l) => l.split('|')).filter((p) => p.length > 1 && p[0].trim()).map((p) => ({ sel: p[0].trim(), text: p.slice(1).join('|').trim() }));
+    const hideTabs = [...document.querySelectorAll('[data-hide]:checked')].map((i) => i.dataset.hide);
+    try { await api('/admin/site', { method: 'POST', body: JSON.stringify({ layout: lay, title: $('#stitle').value, vars, texts, hideTabs, css: $('#scss').value }) }); say('Saved. The public page now uses layout ' + lay + '.', true); }
+    catch (e) { say(e.message === 'Error 404' ? 'Server is missing site-config.js. Add the one line to server.js (see README).' : e.message); }
+  };
+}
+
+async function summary() {
+  const s = await api('/admin/summary');
+  const warn = (s.on_render && !s.persistent) ? `<div class="card" style="border-color:var(--red)"><b style="color:#ff8a85">Your data is NOT saved permanently</b><div class="mute">The database is on a temporary disk, so balances, users and the Treasury are erased on every deploy or restart. In Render add a Disk mounted at /var/data and set DB_PATH=/var/data/wallet.db.</div></div>` : '';
+  $('#view').innerHTML = warn + `
+    <div class="card"><div class="mute">Total in client wallets (Treasury not included)</div><div class="big">${usd(s.total_balance)}</div></div>
+    <div class="row"><div class="card"><div class="mute">Users</div><div class="big">${esc(s.users)}</div></div>
+    <div class="card"><div class="mute">Pending</div><div class="big">${esc(s.pending)}</div></div></div>
+    <div class="row"><div class="card"><div class="mute">Treasury (coin)</div><div class="big">${usd(s.treasury)}</div></div>
+    <div class="card"><div class="mute">Win chance now (switches at ${usd(s.target)})</div><div class="big">${esc(s.win_chance_pct)}%</div></div></div>
+    <div class="row"><div class="card"><div class="mute">In today</div><div class="big">${usd(s.in_today)}</div></div>
+    <div class="card"><div class="mute">Out today</div><div class="big">${usd(s.out_today)}</div></div></div>
+    <button style="width:100%" data-act="backup">Download database backup</button>`;
+}
+
+async function users(q = '') {
+  const list = await api('/admin/users?q=' + encodeURIComponent(q));
+  $('#view').innerHTML = `<input id="q" placeholder="Search email or phone" value="${esc(q)}">` +
+    list.map((u) => `<div class="card">
+      <div><b>${esc(u.email)}</b> <span class="tag ${esc(u.status)}">${esc(u.status)}</span>${u.role === 'admin' ? ' <span class="tag">admin</span>' : ''}</div>
+      <div class="mute">${esc(u.phone)} · ${usd(u.balance)} · ${when(u.created_at)}</div>
+      ${u.role !== 'user' ? '' : `<div class="row" style="margin-top:8px">
+        <button class="${u.status === 'active' ? 'warn' : 'go'}" data-act="status" data-id="${esc(u.id)}" data-to="${u.status === 'active' ? 'suspended' : 'active'}">${u.status === 'active' ? 'Suspend' : 'Activate'}</button>
+        <button data-act="reset" data-id="${esc(u.id)}">Reset password</button></div>`}
+    </div>`).join('') || '<div class="mute">No users found.</div>';
+  $('#q').addEventListener('change', (e) => users(e.target.value).catch((x) => say(x.message)));
+}
+
+async function accountOptions(withTreasury) {
+  const list = await api('/admin/users?q=');
+  const opts = list.map((u) => `<option value="${esc(u.phone)}">${esc(u.email)} · ${esc(u.phone)} · ${usd(u.balance)}${u.role === 'admin' ? ' (admin)' : ''}</option>`).join('');
+  let house = '';
+  if (withTreasury) { const a = await api('/admin/accounts'); house = a.accounts.map((x) => `<option value="${esc(x.key)}">${esc(x.name)} · ${usd(x.balance)}</option>`).join(''); }
+  return house + (opts || (withTreasury ? '' : '<option value="">No registered accounts yet</option>'));
+}
+
+async function agent() {
+  const accounts = await accountOptions(false);
+  $('#view').innerHTML = `<div class="card">
+    <div class="mute">Choose the client account, then enter the amount in USD and a note. Every move is recorded in the Log.</div>
+    <select id="aphone" style="width:100%;padding:12px;margin:6px 0;border-radius:8px;border:1px solid var(--line);background:#000000;color:var(--text);font-size:16px">${accounts}</select>
+    <input id="aamt" inputmode="decimal" placeholder="Amount (USD)">
+    <input id="anote" placeholder="Note (optional)">
+    <div class="row" style="margin-top:8px">
+      <button class="go" data-act="cashin">Cash in</button>
+      <button class="bad" data-act="cashout">Cash out (cash handed over)</button></div>
+    <button class="warn" style="width:100%;margin-top:8px" data-act="cashoutmpesa">Cash out to client's M-Pesa</button>
+    <div class="mute" style="margin-top:6px">"Cash out to M-Pesa" takes the money from the wallet and sends real money to the client's M-Pesa. The other cash out only records cash you handed over.</div></div>`;
+}
+
+async function transfer() {
+  const accounts = await accountOptions(true);
+  const ov = await api('/admin/accounts');
+  const overview = `<div class="card"><b>All accounts</b>` + [['Clients (' + ov.clients.count + ' wallets)', ov.clients.total]].concat(ov.accounts.map((x) => [x.name, x.balance]))
+    .concat([['Held for open live trades (automatic)', ov.held]])
+    .map((r) => `<div class="row" style="justify-content:space-between;margin-top:6px"><span>${esc(r[0])}</span><b>${usd(r[1])}</b></div>`).join('') + `</div>
+    <div class="card"><b>Demo accounts (practice money, automatic)</b>` + ov.demo.map((x) => `<div class="row" style="justify-content:space-between;margin-top:6px"><span>${esc(x.name)}</span><b>${usd(x.balance)}</b></div>`).join('') + `</div>`;
+  const sel = 'style="width:100%;padding:12px;margin:6px 0;border-radius:8px;border:1px solid var(--line);background:#000000;color:var(--text);font-size:16px"';
+  $('#view').innerHTML = overview + `<div class="card">
+    <div class="mute">A real transfer: the sender goes down and the receiver goes up by the same amount. Any account can send to any other: clients, Treasury, Tradecoin value, Surplus, Money transfer, Fees and Agent cash.<br>
+    Every transfer needs a reason and is recorded in the Log.</div>
+    <div class="row" style="margin:8px 0"><button data-act="tpreset" data-from="" data-to="">Account → Account</button>
+      <button data-act="tpreset" data-from="treasury" data-to="">Treasury → Account</button>
+      <button data-act="tpreset" data-from="" data-to="treasury">Account → Treasury</button></div>
+    <div class="mute">From</div><select id="tfrom" ${sel}>${accounts}</select>
+    <div class="mute">To</div><select id="tto" ${sel}>${accounts}</select>
+    <input id="tamt" inputmode="decimal" placeholder="Amount (USD)">
+    <input id="tnote" placeholder="Reason (required)">
+    <button style="width:100%;margin-top:8px" data-act="transfertest">Test run (no money moves)</button>
+    <div id="tresult"></div>
+    <button class="go" style="width:100%;margin-top:8px" data-act="transfer">Transfer (real)</button></div>`;
+}
+
+/* Coin value chart: draws the real Treasury balance (ticks) as candles or a line. Display only; it never moves by itself. */
+function coinChart(cv, ticks, o) {
+  const d = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight; if (!w || !ticks.length) return;
+  cv.width = w * d; cv.height = h * d; const g = cv.getContext('2d'); g.scale(d, d);
+  const per = (o.per || 3) * 1000, N = 42, cw = w - 62, AX = 20, ph = h - 14 - AX, fmt = n => '$' + Number(n).toFixed(2);
+  const now = Date.now(), end = Math.floor(now / per), cs = [];
+  for (let i = end - N + 1; i <= end; i++) cs.push(null);
+  let prev = ticks[0].p; const first = ticks.findIndex(x => Math.floor(x.t / per) >= end - N + 1);
+  if (first > 0) prev = ticks[first - 1].p; else if (first < 0) prev = ticks[ticks.length - 1].p;
+  const byC = {}; ticks.forEach(x => { const c = Math.floor(x.t / per); (byC[c] = byC[c] || []).push(x.p); });
+  const cds = cs.map((_, i) => { const c = end - N + 1 + i, a = byC[c]; if (!a) return { o: prev, h: prev, l: prev, c: prev }; const r = { o: prev, h: Math.max(prev, ...a), l: Math.min(prev, ...a), c: a[a.length - 1] }; prev = r.c; return r; });
+  const lastP = cds[cds.length - 1].c, ex = [lastP - .5, lastP + .5]; if (o.target) ex.push(o.target);
+  let hi = Math.max(...cds.map(x => x.h), ...ex), lo = Math.min(...cds.map(x => x.l), ...ex); const pad = (hi - lo) * .1 || .5; hi += pad; lo -= pad;
+  const X = i => 8 + (cw - 16) * (i + .5) / N, Y = v => 8 + ph * (hi - v) / (hi - lo), UP = '#2ea84f', DN = '#d6403f';
+  g.fillStyle = '#000000'; g.fillRect(0, 0, w, h); g.lineWidth = 1; g.strokeStyle = 'rgba(255,255,255,.07)'; g.font = '600 10px system-ui,sans-serif'; g.fillStyle = '#a8a8a8';
+  for (let k = 0; k <= 4; k++) { const y = Math.round(8 + ph * k / 4) + .5; g.beginPath(); g.moveTo(0, y); g.lineTo(cw, y); g.stroke(); g.fillText(fmt(hi - (hi - lo) * k / 4), cw + 4, Math.min(8 + ph - 2, Math.max(12, y + 4))); }
+  const iv = [5, 10, 15, 30, 60, 120, 300, 600, 1200, 3600].find(x => x * 1000 / per * (cw - 16) / N >= 62) || 3600, pd = n => String(n).padStart(2, '0'); g.textAlign = 'center';
+  cds.forEach((c, i) => { const t = (end - N + 1 + i) * per; if (Math.floor(t / (iv * 1000)) > Math.floor((t - per) / (iv * 1000))) { const xx = Math.round(X(i)) + .5, dt = new Date(t); g.beginPath(); g.moveTo(xx, 8); g.lineTo(xx, 8 + ph); g.stroke(); g.fillText(pd(dt.getHours()) + ':' + pd(dt.getMinutes()) + (iv < 60 ? ':' + pd(dt.getSeconds()) : ''), xx, h - 6); } });
+  g.textAlign = 'left';
+  if (o.mode === 'line') { g.beginPath(); cds.forEach((c, i) => i ? g.lineTo(X(i), Y(c.c)) : g.moveTo(X(i), Y(c.c))); g.strokeStyle = '#5b8cff'; g.lineWidth = 2; g.stroke(); g.lineTo(X(N - 1), 8 + ph); g.lineTo(X(0), 8 + ph); g.closePath(); g.fillStyle = 'rgba(91,140,255,.12)'; g.fill(); }
+  else { const bw = Math.max(3, (cw - 16) / N * .8); cds.forEach((c, i) => { const col = c.c >= c.o ? UP : DN; g.strokeStyle = col; g.lineWidth = 1.2; g.beginPath(); g.moveTo(X(i), Y(c.h)); g.lineTo(X(i), Y(c.l)); g.stroke(); g.fillStyle = col; g.fillRect(X(i) - bw / 2, Math.min(Y(c.o), Y(c.c)), bw, Math.max(2, Math.abs(Y(c.o) - Y(c.c)))); }); }
+  const tag = (txt, x, y, bg, right) => { g.font = '600 11px system-ui,sans-serif'; const tw = g.measureText(txt).width + 10, x0 = right ? Math.max(2, x - tw) : x; g.fillStyle = bg; g.fillRect(x0, y - 9, tw, 18); g.fillStyle = '#fff'; g.fillText(txt, x0 + 5, y + 4); };
+  if (o.target && Y(o.target) > 0 && Y(o.target) < 8 + ph) { g.strokeStyle = '#c26a00'; g.lineWidth = 1.2; g.setLineDash([6, 4]); g.beginPath(); g.moveTo(0, Y(o.target)); g.lineTo(cw, Y(o.target)); g.stroke(); g.setLineDash([]); tag('Target ' + fmt(o.target), 4, Math.min(8 + ph - 4, Math.max(12, Y(o.target) - 11)), '#c26a00'); }
+  (o.marks || []).forEach(m => { const c = Math.floor(m.t / per) - (end - N + 1); if (c < 0 || c >= N) return; const y = Y(cds[c].c), col = m.win === true ? UP : m.win === false ? DN : '#a8a8a8'; g.fillStyle = col; g.beginPath(); g.arc(X(c), y, 5, 0, 6.3); g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 1; g.stroke(); });
+  const col = lastP >= cds[cds.length - 1].o ? UP : DN; g.strokeStyle = col; g.lineWidth = 1; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(0, Y(lastP)); g.lineTo(cw, Y(lastP)); g.stroke(); g.setLineDash([]); tag(fmt(lastP), cw + 2, Math.min(8 + ph - 2, Math.max(10, Y(lastP))), col);
+}
+
+let admTimer=null,admMode='candle',admPer=3,admTgt='demo';
+let simA = null;
+const simM = () => admTgt === 'live' ? 'live' : 'demo';
+const postSim = (body) => Promise.all((admTgt === 'both' ? ['demo', 'live'] : [admTgt]).map((m) => post('/admin/sim', Object.assign({ m }, body))));
+function aiDecide(c) { const want = c.s > c.b ? 1 : c.b > c.s ? -1 : 0; return { want, txt: want > 0 ? '▲ UPTREND (direction = +1)' : want < 0 ? '▼ DOWNTREND (direction = −1)' : 'SURPLUS ON (direction = 0)', why: want > 0 ? 'total Sell stakes ($' + c.s.toFixed(2) + ') are bigger than total Buy stakes ($' + c.b.toFixed(2) + '): price pushed up, against the Sells' : want < 0 ? 'total Buy stakes ($' + c.b.toFixed(2) + ') are bigger than total Sell stakes ($' + c.s.toFixed(2) + '): price pushed down, against the Buys' : c.b + c.s === 0 ? 'no open trades' : 'Buy stakes equal Sell stakes' }; }
+async function market() {
+  const q = await api('/admin/sim?hist=1&m=' + simM());
+  const seg = (arr, key, cur) => arr.map(([v, l]) => `<button data-act="${key}" data-val="${v}" class="${v === cur ? 'on' : ''}">${l}</button>`).join('');
+  simA = { n: q.n, a: q.hist.a.slice(), last: q };
+  const both = admTgt === 'both';
+  $('#view').innerHTML = `<div class="badge ${admTgt}"><span>${both ? 'DEMO + LIVE' : admTgt.toUpperCase()}</span><small>${both ? 'Controls apply to both markets' : 'Controlling the ' + admTgt + ' market'}</small></div>
+    <div class="mute">Market to control</div><div class="row" style="margin:6px 0 12px">${seg([['demo', 'Demo'], ['live', 'Live'], ['both', 'Both']], 'mtgt', admTgt)}</div>
+    <div class="card"><div class="mute">Tradecoin value · ${admTgt === 'live' ? 'live market' : 'demo (practice) market'}${both ? ' · chart shows Demo' : ''}</div><div class="big" id="mv">${esc(q.v.toFixed(2))}</div><div class="mute" id="mcv"></div>
+    <div class="row" style="margin:8px 0">${seg([['candle', 'Candles'], ['line', 'Line']], 'cmode', admMode)}</div>
+    <div class="mute">Candle time</div><div class="row" style="margin:6px 0">${seg(Array.from({ length: 10 }, (_, i) => [i + 1, (i + 1) + 's']), 'cper', admPer)}</div>
+    <canvas id="coinc" style="width:100%;height:250px;display:block;border-radius:12px;background:#000000"></canvas></div>
+    <div class="card"><b>Market control</b><div class="mute" id="mstat"></div>
+    <div class="row" style="margin:8px 0"><button data-act="mmode" data-val="auto">Surplus on</button><button data-act="mmode" data-val="up">▲ Uptrend</button><button data-act="mmode" data-val="down">▼ Downtrend</button></div>
+    <button id="aibtn" data-act="mai" style="width:100%">AI: off</button><div class="aibox" id="aib"></div>
+    <div class="mute" style="margin-top:6px">The AI is on by default and stays on until you turn it off. A manual trend turns it off. Clients are told on their screen whenever the AI is on and that it moves the market against the side with more open trades.</div></div>
+    ${window.TEST_MODE ? `<div class="card"><b>Test crowd</b><div class="mute">Test only: simulated other clients' open trades for the selected market (they count for 60 s).</div>
+    <div class="row" style="margin-top:8px"><button data-act="crowd" data-val="b1">+1 Buy</button><button data-act="crowd" data-val="s1">+1 Sell</button><button data-act="crowd" data-val="b5">+5 Buys</button><button data-act="crowd" data-val="s5">+5 Sells</button><button data-act="crowd" data-val="x">Clear</button></div></div>` : ''}
+    <div class="card"><b>Admin transfer</b> <span class="big" id="admb" style="font-size:20px"></span>
+    <div class="mute">Money lost by traders lands here. To add value to the coin the market is closed first: the chart freezes and open trades are closed.</div>
+    <input id="xamt" inputmode="decimal" placeholder="Amount (USD)">
+    <select id="xsrc" style="width:100%;padding:12px;margin:6px 0;border-radius:8px;border:1px solid var(--line);background:#000000;color:var(--text);font-size:16px"><option value="transfer">From admin transfer</option><option value="direct">Add directly</option></select>
+    <button class="warn" style="width:100%" data-act="xclose" id="xclose">Close market &amp; add value</button>
+    <button class="go" style="width:100%;margin-top:8px" data-act="xstart" id="xstart" hidden>Start transfer</button>
+    <button style="width:100%;margin-top:8px" data-act="xopen" id="xopen" hidden>Open trading</button>
+    <div class="mute" id="xst" style="margin-top:6px"></div></div>`;
+  const paint = (m) => { const now = Date.now(), L = simA.a.length, ticks = simA.a.map((p, i) => ({ t: now - (L - 1 - i) * 1000, p }));
+    coinChart($('#coinc'), ticks, { mode: admMode, per: admPer, marks: (m.marks || []).map((x) => ({ t: x.t, win: x.dir > 0 })) });
+    $('#mv').textContent = '$' + m.v.toFixed(2);
+    $('#mcv').textContent = both ? '' : 'Tradecoin value account: $' + Number(m.cv || 0).toFixed(2) + ' (the chart moves around this)';
+    $('#mstat').textContent = (m.fr ? 'Market frozen' : m.ton ? 'Trend running' : 'Surplus on') + ' · trading ' + (m.op ? 'open' : 'closed') + ' · open Buys $' + m.counts.b.toFixed(2) + ' (' + m.counts.bn + ' trades), Sells $' + m.counts.s.toFixed(2) + ' (' + m.counts.sn + ' trades)';
+    const ai = $('#aibtn'); ai.textContent = 'AI: ' + (m.ai ? 'on' : 'off'); ai.classList.toggle('on', m.ai);
+    const d = aiDecide(m.counts);
+    $('#aib').innerHTML = (m.ai ? '<b>AI is choosing:</b> ' : 'AI is off. It would choose: ') + '<b>' + d.txt + '</b><br><span class="mute">Inputs: total Buy stakes $' + m.counts.b.toFixed(2) + ' · total Sell stakes $' + m.counts.s.toFixed(2) + '. Rule: ' + d.why + '.</span>';
+    $('#admb').textContent = both ? '' : '$' + Number(m.adm).toFixed(2);
+    $('#xclose').disabled = both || m.xs !== 'idle'; $('#xamt').disabled = $('#xsrc').disabled = $('#xclose').disabled;
+    $('#xstart').hidden = both || m.xs !== 'frozen'; $('#xopen').hidden = both || m.op || m.xs !== 'idle';
+    $('#xst').textContent = both ? 'Pick Demo or Live for transfers.' : m.xs === 'frozen' ? 'Market frozen. Open trades closed. Press Start transfer.' : m.xs === 'running' ? 'Transferring $' + Number(m.xa).toFixed(2) + ', second ' + m.xk + ' of 19.' : m.op ? 'Trading is open.' : 'Trading is closed.'; };
+  window.admPaint = () => paint(simA.last); paint(q);
+  clearInterval(admTimer);
+  admTimer = setInterval(async () => { if (!$('#coinc')) { clearInterval(admTimer); return; }
+    try { const m = await api('/admin/sim?m=' + simM()), gap = m.n - simA.n;
+      if (gap > 0 && gap <= m.tv.length) { m.tv.slice(m.tv.length - gap).forEach((v) => simA.a.push(v)); simA.n = m.n; if (simA.a.length > 3000) simA.a.splice(0, simA.a.length - 3000); }
+      else if (gap !== 0) { const h = await api('/admin/sim?hist=1&m=' + simM()); simA.a = h.hist.a.slice(); simA.n = h.n; }
+      simA.last = m; paint(m); } catch (e) {} }, 1000);
+}
+
+async function treasury() {
+  const t = await api('/admin/treasury');
+  $('#view').innerHTML = `<div class="card"><div class="mute">Tradecoin Treasury (house account, belongs to no client)</div><div class="big">${usd(t.balance)}</div>
+    <div class="mute">Fees collected: ${usd(t.fees)} · Open bets: ${esc(t.open)} (must cover ${usd(t.exposure)}) · Wins the house had to cover beyond the Treasury: ${usd(t.covered)} </div></div>
+    <div class="card"><div class="mute">Win chance shown to clients</div><div class="big">${esc(t.win_chance_pct)}%</div><div class="mute">${esc(t.chance_low_pct)}% while the Treasury is under ${usd(t.target)}, ${esc(t.chance_high_pct)}% once it reaches ${usd(t.target)}. Clients see this rule on the Tradecoin screen.</div></div>
+    <div class="card"><b>Send to a client</b>
+    <input id="tsto" inputmode="tel" placeholder="Client phone (07XXXXXXXX)"><input id="tsamt" inputmode="decimal" placeholder="Amount (USD)"><input id="tsnote" placeholder="Reason (required)">
+    <button class="go" style="width:100%;margin-top:8px" data-act="tsend">Send from Treasury</button></div>
+    <div class="card"><b>Add reserve</b><div class="mute">Only record money you really put in from outside (this is the one place money enters the Treasury without coming from another account). To move money from an account instead, use the Transfer tab.</div>
+    <input id="tfamt" inputmode="decimal" placeholder="Amount (USD)"><input id="tfnote" placeholder="Source (required)">
+    <button style="width:100%;margin-top:8px" data-act="tfund">Add to Treasury</button></div>` +
+    t.log.map((l) => `<div class="card"><div><b>${esc(l.entry)}</b> ${usd(l.delta)}</div><div class="mute">Balance ${usd(l.balance_after)} · ${when(l.created_at)}</div></div>`).join('');
+}
+
+async function txs() {
+  const list = await api('/admin/transactions');
+  $('#view').innerHTML = list.map((t) => {
+    const stuck = ['topup', 'withdraw'].includes(t.kind) && ['pending', 'review'].includes(t.status);
+    return `<div class="card">
+    <div><b>${esc(t.kind)}</b> ${usd(t.amount)} <span class="tag ${esc(t.status)}">${esc(t.status)}</span> <span class="mute">#${esc(t.id)}</span></div>
+    <div class="mute">${esc(t.email)} · ${when(t.created_at)}${t.receipt ? ' · ' + esc(t.receipt) : ''}</div>
+    ${t.reason ? `<div class="mute">Reason: ${esc(t.reason)}</div>` : ''}
+    ${stuck ? `<div class="mute" style="margin-top:6px">Settle only after checking the M-Pesa statement.</div>
+    <div class="row" style="margin-top:8px">
+      <button class="go" data-act="resolve" data-id="${esc(t.id)}" data-to="success">Mark success</button>
+      <button class="bad" data-act="resolve" data-id="${esc(t.id)}" data-to="failed">Mark failed</button></div>` : ''}
+  </div>`; }).join('') || '<div class="mute">No transactions yet.</div>';
+}
+
+async function log() {
+  const list = await api('/admin/log');
+  $('#view').innerHTML = list.map((l) => `<div class="card">
+    <div><b>${esc(l.action)}</b> · user #${esc(l.target_id)}</div>
+    <div class="mute">${esc(l.detail)} · ${esc(l.admin)} · ${when(l.created_at)}</div></div>`).join('') || '<div class="mute">Nothing logged yet.</div>';
+}
+
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  try {
+    if (b.id === 'loginBtn') return login();
+    if (b.id === 'logout') { try { localStorage.removeItem('adminToken'); sessionStorage.removeItem('adminToken'); } catch (x) {} token = null; return location.reload(); }
+    if (b.dataset.v) return show(b.dataset.v);
+    if (b.dataset.act === 'cmode') { admMode = b.dataset.val; document.querySelectorAll('[data-act=cmode]').forEach((x) => x.classList.toggle('on', x === b)); return window.admPaint && window.admPaint(); }
+    if (b.dataset.act === 'cper') { admPer = Number(b.dataset.val); document.querySelectorAll('[data-act=cper]').forEach((x) => x.classList.toggle('on', x === b)); return window.admPaint && window.admPaint(); }
+    if (b.dataset.act === 'mtgt') { admTgt = b.dataset.val; return await market(); }
+    if (b.dataset.act === 'mmode') { await postSim({ action: 'mode', val: b.dataset.val }); return; }
+    if (b.dataset.act === 'mai') { await postSim({ action: 'ai', on: !(simA && simA.last && simA.last.ai) }); return; }
+    if (b.dataset.act === 'crowd') { await postSim({ action: 'crowd', val: b.dataset.val }); return; }
+    if (b.dataset.act === 'xclose') {
+      if (admTgt === 'both') return say('Pick Demo or Live for a transfer.');
+      const body = { action: 'xfer-close', amount: $('#xamt').value, src: $('#xsrc').value };
+      if (!confirm(`Close the ${admTgt} market and ${body.src === 'transfer' ? 'transfer' : 'add'} $${body.amount} to the coin? Open trades are closed at the current value.`)) return;
+      await postSim(body); return say('Market closed. Press Start transfer when ready.', true);
+    }
+    if (b.dataset.act === 'xstart') { await postSim({ action: 'xfer-start' }); return say('Transfer started', true); }
+    if (b.dataset.act === 'xopen') { await postSim({ action: 'open' }); return say('Trading opened', true); }
+
+    if (b.dataset.act === 'status') { await post(`/admin/users/${b.dataset.id}/status`, { status: b.dataset.to }); say('Updated', true); return users($('#q')?.value || ''); }
+    if (b.dataset.act === 'reset') {
+      const pw = prompt('New password for this user (8+ characters):'); if (!pw) return;
+      await post(`/admin/users/${b.dataset.id}/reset-password`, { password: pw }); return say('Password reset. Tell the user their new password.', true);
+    }
+    if (b.dataset.act === 'resolve') {
+      const outcome = b.dataset.to;
+      let receipt = '';
+      if (outcome === 'success') { receipt = prompt('M-Pesa receipt code from the statement (e.g. SKL1ABC2DE):') || ''; if (!receipt.trim()) return say('A receipt code is required to mark success.'); }
+      if (!confirm(`Mark transaction #${b.dataset.id} as ${outcome}? This moves money in the wallet and cannot be undone.`)) return;
+      await post(`/admin/transactions/${b.dataset.id}/resolve`, { outcome, receipt: receipt.trim() });
+      say('Transaction settled', true); return txs();
+    }
+    if (b.dataset.act === 'tpreset') {
+      const accts = [...$('#tfrom').options].map((o) => o.value).filter((v) => /^\d/.test(v));
+      $('#tfrom').value = b.dataset.from || accts[0] || ''; $('#tto').value = b.dataset.to || accts[1] || accts[0] || ''; return;
+    }
+    if (b.dataset.act === 'tsend') {
+      const body = { to: $('#tsto').value, amount: $('#tsamt').value, note: $('#tsnote').value };
+      if (!confirm(`Send $${body.amount} from the Treasury to ${body.to}?\nReason: ${body.note}`)) return;
+      await post('/admin/treasury/send', body); say('Sent from Treasury', true); return treasury();
+    }
+    if (b.dataset.act === 'tfund') {
+      const body = { amount: $('#tfamt').value, note: $('#tfnote').value };
+      if (!confirm(`Add $${body.amount} to the Treasury reserve?\nSource: ${body.note}`)) return;
+      await post('/admin/treasury/fund', body); say('Reserve added', true); return treasury();
+    }
+    if (b.dataset.act === 'transfertest') {
+      const body = { from: $('#tfrom').value, to: $('#tto').value, amount: $('#tamt').value, note: $('#tnote').value || 'test run', dry: true };
+      try {
+        const r = await post('/admin/transfer', body);
+        $('#tresult').innerHTML = `<div class="card" style="border-color:var(--green)"><b>TEST RUN: nothing was moved</b>
+          <div class="row" style="justify-content:space-between;margin-top:6px"><span>${esc(r.from.name)}</span><span>${usd(r.from.before)} → <b>${usd(r.from.after)}</b></span></div>
+          <div class="row" style="justify-content:space-between;margin-top:6px"><span>${esc(r.to.name)}</span><span>${usd(r.to.before)} → <b>${usd(r.to.after)}</b></span></div>
+          <div class="mute" style="margin-top:6px">All checks passed. Press "Transfer (real)" to do it for real.</div></div>`;
+      } catch (e) { $('#tresult').innerHTML = `<div class="card" style="border-color:var(--red)"><b>TEST RUN failed</b><div class="mute">${esc(e.message)}</div></div>`; }
+      return;
+    }
+    if (b.dataset.act === 'transfer') {
+      const body = { from: $('#tfrom').value, to: $('#tto').value, amount: $('#tamt').value, note: $('#tnote').value };
+      const nm = (id) => { const o = $(id).selectedOptions[0]; return o ? o.textContent.split(' · ')[0] : ''; };
+      if (!confirm(`Transfer $${body.amount} from ${nm('#tfrom')} to ${nm('#tto')}?\nReason: ${body.note}`)) return;
+      await post('/admin/transfer', body);
+      say('Transfer done: ' + usd(Math.round(Number(body.amount) * 100)) + ' moved from ' + body.from + ' to ' + body.to, true); ['#tamt', '#tnote'].forEach((x) => { $(x).value = ''; }); return;
+    }
+    if (b.dataset.act === 'backup') {
+      const r = await fetch('/admin/backup', { headers: { Authorization: 'Bearer ' + token } });
+      if (!r.ok) throw new Error('Backup failed');
+      const u = URL.createObjectURL(await r.blob()), l = document.createElement('a'); l.href = u; l.download = 'wallet-backup.db'; l.click(); URL.revokeObjectURL(u);
+      return say('Backup downloaded', true);
+    }
+    if (b.dataset.act === 'cashoutmpesa') {
+      const body = { phone: $('#aphone').value, amount: $('#aamt').value, note: $('#anote').value };
+      if (!body.phone) return say('Choose a client account first.');
+      if (!confirm(`Send $${body.amount} from ${$('#aphone').selectedOptions[0].text}'s wallet to their M-Pesa as real money? This cannot be undone.`)) return;
+      const r = await post('/admin/agent/cash-out-mpesa', body);
+      say(r.message + ' (KES ' + Number(r.kes).toLocaleString() + ')', true); $('#aamt').value = ''; $('#anote').value = ''; return;
+    }
+    if (b.dataset.act === 'cashin' || b.dataset.act === 'cashout') {
+      const kind = b.dataset.act === 'cashin' ? 'cash-in' : 'cash-out';
+      const body = { phone: $('#aphone').value, amount: $('#aamt').value, note: $('#anote').value };
+      if (!confirm(`Confirm ${kind} of $${body.amount} for ${body.phone}?`)) return;
+      await post('/admin/agent/' + kind, body);
+      say('Done: ' + kind + ' recorded', true); $('#aamt').value = ''; $('#anote').value = '';
+    }
+  } catch (err) { say(err.message); }
+});
+$('#pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
+
+if (token) start();
+</script>
+<button id="installApp" style="position:fixed;top:8px;right:8px;z-index:60;padding:8px 14px;border-radius:20px;background:#2563eb;color:#fff;border:0;font-weight:600">⬇ Download the app</button>
+<script>
+if ('serviceWorker' in navigator && location.protocol === 'https:') addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+(() => { let ev = window.__bip; const b = document.getElementById('installApp');
+  const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  if (standalone()) { b.hidden = true; return; }
+  addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); ev = e; });
+  addEventListener('appinstalled', () => { b.hidden = true; });
+  b.onclick = async () => {
+    ev = ev || window.__bip;
+    if (ev) { ev.prompt(); try { await ev.userChoice; } catch (x) {} ev = null; return; }
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const how = ios ? 'Tap the Share button, then \u201cAdd to Home Screen\u201d.' : 'Open the browser menu (\u22EE) and tap \u201cInstall app\u201d or \u201cAdd to Home screen\u201d. If it is already installed, open it from your home screen.';
+    const o = document.createElement('div'); o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:99999;padding:16px';
+    o.innerHTML = '<div style="background:#1b1d22;color:#eee;border-radius:14px;padding:18px;max-width:340px;font:15px/1.45 system-ui,sans-serif"><b style="font-size:17px">Download the app</b><p style="margin:10px 0 14px">' + how + '</p><button style="width:100%;padding:10px;border:0;border-radius:10px;background:#2563eb;color:#fff;font-weight:600">OK</button></div>';
+    o.onclick = (e) => { if (e.target === o || e.target.tagName === 'BUTTON') o.remove(); }; document.body.appendChild(o);
+  }; })();
+</script>
+</body>
+</html>
